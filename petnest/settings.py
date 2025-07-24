@@ -203,5 +203,5 @@ SWAGGER_SETTINGS = {
             'description': 'Enter token as: Bearer <your_token>',
         },
     },
-    'USE_SESSION_AUTH': False,  # Disable session auth since you're using JWT
+    'USE_SESSION_AUTH': False,  
 }
