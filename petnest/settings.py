@@ -1,4 +1,3 @@
-
 """
 Django settings for petnest project.
 
@@ -13,15 +12,21 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+from decouple import config
+import dj_database_url
+import os
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-i-8tezn6att6i6na8el+nvjba-!dg9#ve$u#d21rbl_lyillw3'
+SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config('DEBUG', cast=bool)
 
 ALLOWED_HOSTS = ['*']  # Allow all hosts for local development
 
@@ -33,6 +38,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'cloudinary_storage',
+    'cloudinary',
     'rest_framework',
     'rest_framework_simplejwt',
     'django_filters',
@@ -45,7 +52,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # Must be first
+    'corsheaders.middleware.CorsMiddleware',  
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -77,18 +84,24 @@ ASGI_APPLICATION = 'petnest.asgi.application'
 
 # Database
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(default=config('DATABASE_URL'))
 }
+
+# Cloudinary configuration
+cloudinary.config(
+    cloud_name=config('CLOUDINARY_CLOUD_NAME'),
+    api_key=config('CLOUDINARY_API_KEY'),
+    api_secret=config('CLOUDINARY_API_SECRET'),
+    secure=True
+)
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
 # Channels configuration
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            'hosts': [('127.0.0.1', 6379)],
+            'hosts': [(config('REDIS_HOST'), config('REDIS_PORT', cast=int))],
         },
     },
 }
@@ -116,7 +129,8 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'static'
 
 # Media files
 MEDIA_URL = '/media/'
@@ -146,38 +160,27 @@ SIMPLE_JWT = {
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
-# SSLCom com merz Configuration
-SSLCOMMERZ_STORE_ID = 'futur6810e83285aec'  # Replace with your SSLCommerz store ID
-SSLCOMMERZ_STORE_PASSWORD = 'futur6810e83285aec@ssl'  # Replace with your SSLCommerz store password
-SSLCOMMERZ_SANDBOX = True  # Set to False in production
-SSLCOMMERZ_SUCCESS_URL = 'http://127.0.0.1:8000/pets/payment/callback/'
-SSLCOMMERZ_FAIL_URL = 'http://127.0.0.1:8000/pets/payment/callback/'
-SSLCOMMERZ_CANCEL_URL = 'http://127.0.0.1:8000/pets/payment/callback/'
-
+# SSLCommerz Configuration
+SSLCOMMERZ_STORE_ID = config('SSLCOMMERZ_STORE_ID')
+SSLCOMMERZ_STORE_PASSWORD = config('SSLCOMMERZ_STORE_PASSWORD')
+SSLCOMMERZ_SANDBOX = config('SSLCOMMERZ_SANDBOX', cast=bool)
+SSLCOMMERZ_SUCCESS_URL = config('SSLCOMMERZ_SUCCESS_URL')
+SSLCOMMERZ_FAIL_URL = config('SSLCOMMERZ_FAIL_URL')
+SSLCOMMERZ_CANCEL_URL = config('SSLCOMMERZ_CANCEL_URL')
 
 # Email settings
-# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # Use console for testing
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'  # Uncomment for production
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'nottamimislam@gmail.com'
-EMAIL_HOST_PASSWORD = 'piiy bxeo gkby utzh'
-DEFAULT_FROM_EMAIL = 'nottamimislam@gmail.com'
+EMAIL_BACKEND = config('EMAIL_BACKEND')
+EMAIL_HOST = config('EMAIL_HOST')
+EMAIL_PORT = config('EMAIL_PORT', cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', cast=bool)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL')
 
 # Frontend URL for password reset links
-FRONTEND_URL = 'http://localhost:8000'
+FRONTEND_URL = config('FRONTEND_URL')
 
-# Media settings for ImageField
-MEDIA_URL = '/media/'
-MEDIA_ROOT = 'media'
-
-# Static files (CSS, JavaScript, Images)
-STATIC_URL = '/static/'
-STATIC_ROOT = 'static'
-
-# Add to your existing settings.py
-
+# Logging
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -203,5 +206,5 @@ SWAGGER_SETTINGS = {
             'description': 'Enter token as: Bearer <your_token>',
         },
     },
-    'USE_SESSION_AUTH': False,  
+    'USE_SESSION_AUTH': False,
 }

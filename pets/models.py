@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from cloudinary.models import CloudinaryField
 
 class Pet(models.Model):
     PET_TYPES = (
@@ -51,7 +52,7 @@ class PetImage(models.Model):
         on_delete=models.CASCADE,
         related_name='images'
     )
-    image = models.ImageField(upload_to='pets/images/')
+    image = CloudinaryField('image')
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

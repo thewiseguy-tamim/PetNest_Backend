@@ -1,8 +1,15 @@
 from rest_framework import serializers
 from .models import CustomUser, VerificationRequest, Post
-from pets.models import Pet  # Import Pet model to fix NameError
+from pets.models import Pet
+from cloudinary.uploader import upload
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.core.mail import send_mail
+from django.conf import settings
 
 class VerificationRequestSerializer(serializers.ModelSerializer):
+    nid_front = serializers.ImageField(use_url=True)
+    nid_back = serializers.ImageField(use_url=True)
+
     class Meta:
         model = VerificationRequest
         fields = ['nid_number', 'nid_front', 'nid_back', 'phone', 'address', 'city', 'state', 'postcode', 'submitted_at', 'status', 'notes']
@@ -38,7 +45,6 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
         fields = ['id', 'username', 'email', 'role', 'is_verified', 'verification_status', 'date_joined']
-        ref_name = 'UsersUserSerializer'  
 
 class UserRegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
@@ -51,10 +57,22 @@ class UserRegisterSerializer(serializers.ModelSerializer):
         return CustomUser.objects.create_user(**validated_data)
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    profile_picture = serializers.ImageField(use_url=True, required=False)
+
     class Meta:
         model = CustomUser
         fields = ['username', 'email', 'phone', 'address', 'city', 'state', 'postcode', 'profile_picture']
         read_only_fields = ['email']
+
+    def update(self, instance, validated_data):
+        profile_picture = validated_data.pop('profile_picture', None)
+        if profile_picture:
+            upload_result = upload(profile_picture)
+            instance.profile_picture = upload_result['public_id']
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
 
 class AdminUserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -75,6 +93,9 @@ class AdminPostSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'pet', 'is_paid', 'is_free', 'created_at']
 
 class AdminVerificationRequestSerializer(serializers.ModelSerializer):
+    nid_front = serializers.ImageField(use_url=True)
+    nid_back = serializers.ImageField(use_url=True)
+
     class Meta:
         model = VerificationRequest
         fields = ['id', 'user', 'nid_number', 'nid_front', 'nid_back', 'phone', 'address', 'city', 'state', 'postcode', 'submitted_at', 'status', 'notes']

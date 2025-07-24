@@ -1,14 +1,15 @@
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 import uuid
-from pets.models import Pet  # Import Pet model from pets app
+from pets.models import Pet
+from cloudinary.models import CloudinaryField
 
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, username, password=None, **extra_fields):
         if not email:
             raise ValueError('The Email field must be set')
         email = self.normalize_email(email)
-        extra_fields.setdefault('role', 'client')  # Default role is client
+        extra_fields.setdefault('role', 'client')
         user = self.model(email=email, username=username, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
@@ -18,7 +19,7 @@ class CustomUserManager(BaseUserManager):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_verified', True)
-        extra_fields.setdefault('role', 'admin')  # Superusers are admins
+        extra_fields.setdefault('role', 'admin')
         return self.create_user(email, username, password, **extra_fields)
 
 class CustomUser(AbstractBaseUser, PermissionsMixin):
@@ -37,13 +38,13 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
     address = models.CharField(max_length=255, blank=True, null=True)
-    city = models.CharField(max_length=100, blank=True, null=True)  # For SSLCOMMERZ
-    state = models.CharField(max_length=100, blank=True, null=True)  # For SSLCOMMERZ
-    postcode = models.CharField(max_length=20, blank=True, null=True)  # For SSLCOMMERZ
+    city = models.CharField(max_length=100, blank=True, null=True)
+    state = models.CharField(max_length=100, blank=True, null=True)
+    postcode = models.CharField(max_length=20, blank=True, null=True)
     nid_number = models.CharField(max_length=50, blank=True, null=True)
-    nid_front = models.ImageField(upload_to='nid/front/', blank=True, null=True)
-    nid_back = models.ImageField(upload_to='nid/back/', blank=True, null=True)
-    profile_picture = models.ImageField(upload_to='profiles/', default='default.png', blank=True, null=True)
+    nid_front = CloudinaryField('nid_front', blank=True, null=True)
+    nid_back = CloudinaryField('nid_back', blank=True, null=True)
+    profile_picture = CloudinaryField('profile_picture', default='default.png', blank=True, null=True)
     is_verified = models.BooleanField(default=False)
     verification_status = models.CharField(
         max_length=20,
@@ -72,13 +73,13 @@ class VerificationRequest(models.Model):
 
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='verification_requests')
     nid_number = models.CharField(max_length=50)
-    nid_front = models.ImageField(upload_to='verification/front/')
-    nid_back = models.ImageField(upload_to='verification/back/')
+    nid_front = CloudinaryField('verification_front')
+    nid_back = CloudinaryField('verification_back')
     phone = models.CharField(max_length=20)
     address = models.CharField(max_length=255)
-    city = models.CharField(max_length=100)  # For SSLCOMMERZ
-    state = models.CharField(max_length=100)  # For SSLCOMMERZ
-    postcode = models.CharField(max_length=20)  # For SSLCOMMERZ
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    postcode = models.CharField(max_length=20)
     submitted_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     notes = models.TextField(blank=True, null=True)
