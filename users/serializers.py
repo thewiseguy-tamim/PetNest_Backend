@@ -45,6 +45,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
         fields = ['id', 'username', 'email', 'role', 'is_verified', 'verification_status', 'date_joined']
+        ref_name = 'UsersUserSerializer'
 
 class UserRegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
