@@ -15,6 +15,7 @@ from django.utils.html import strip_tags
 from .models import Pet, PetImage, Payment
 from .serializers import PetSerializer, PaymentSerializer
 from .filters import PetFilter
+from rest_framework.permissions import AllowAny
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -34,7 +35,9 @@ class IsAdminOrModerator(permissions.BasePermission):
 class PetCreateView(generics.CreateAPIView):
     queryset = Pet.objects.all()
     serializer_class = PetSerializer
-    permission_classes = [permissions.IsAuthenticated, IsVerifiedUser]
+    # permission_classes = [permissions.IsAuthenticated, IsVerifiedUser]
+    
+
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -122,6 +125,7 @@ class PetListView(generics.ListAPIView):
     serializer_class = PetSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_class = PetFilter
+    permission_classes = [AllowAny]  # Allow any user to create a pet post
 
 class PetDetailView(generics.RetrieveAPIView):
     queryset = Pet.objects.all()
