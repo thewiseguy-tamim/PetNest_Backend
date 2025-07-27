@@ -130,6 +130,7 @@ class PetListView(generics.ListAPIView):
 class PetDetailView(generics.RetrieveAPIView):
     queryset = Pet.objects.all()
     serializer_class = PetSerializer
+    permission_classes = [AllowAny]
 
 class PetUpdateView(generics.UpdateAPIView):
     queryset = Pet.objects.all()
