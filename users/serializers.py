@@ -58,7 +58,7 @@ class UserRegisterSerializer(serializers.ModelSerializer):
         return CustomUser.objects.create_user(**validated_data)
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    profile_picture = serializers.ImageField(use_url=True, required=False)
+    profile_picture = serializers.ImageField(use_url=True, required=False, allow_null=True)
 
     class Meta:
         model = CustomUser
@@ -70,6 +70,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
         if profile_picture:
             upload_result = upload(profile_picture)
             instance.profile_picture = upload_result['public_id']
+        elif profile_picture == '':
+            instance.profile_picture = None  
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()

@@ -20,6 +20,7 @@ class CustomUserManager(BaseUserManager):
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_verified', True)
         extra_fields.setdefault('role', 'admin')
+        extra_fields.setdefault('verification_status', 'verified')  
         return self.create_user(email, username, password, **extra_fields)
 
 class CustomUser(AbstractBaseUser, PermissionsMixin):
@@ -44,12 +45,14 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     nid_number = models.CharField(max_length=50, blank=True, null=True)
     nid_front = CloudinaryField('nid_front', blank=True, null=True)
     nid_back = CloudinaryField('nid_back', blank=True, null=True)
-    profile_picture = CloudinaryField('profile_picture', default='default.png', blank=True, null=True)
+    profile_picture = CloudinaryField('profile_picture', blank=True, null=True)  
     is_verified = models.BooleanField(default=False)
     verification_status = models.CharField(
         max_length=20,
         choices=VerificationStatus.choices,
-        default=VerificationStatus.PENDING
+        null=True,
+        blank=True,
+        default=None
     )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)

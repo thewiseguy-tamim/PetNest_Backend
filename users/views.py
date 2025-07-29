@@ -82,27 +82,20 @@ class VerificationRequestView(generics.CreateAPIView):
             )
             user.verification_status = CustomUser.VerificationStatus.REJECTED
             user.is_verified = False
-            user.phone = serializer.validated_data['phone']
-            user.address = serializer.validated_data['address']
-            user.city = serializer.validated_data['city']
-            user.state = serializer.validated_data['state']
-            user.postcode = serializer.validated_data['postcode']
-            user.nid_number = serializer.validated_data['nid_number']
-            user.nid_front = serializer.validated_data['nid_front']
-            user.nid_back = serializer.validated_data['nid_back']
-            user.save()
         else:
-            serializer.save(user=user)
-            user.phone = serializer.validated_data['phone']
-            user.address = serializer.validated_data['address']
-            user.city = serializer.validated_data['city']
-            user.state = serializer.validated_data['state']
-            user.postcode = serializer.validated_data['postcode']
-            user.nid_number = serializer.validated_data['nid_number']
-            user.nid_front = serializer.validated_data['nid_front']
-            user.nid_back = serializer.validated_data['nid_back']
+            serializer.save(user=user, status=VerificationRequest.Status.PENDING)
             user.verification_status = CustomUser.VerificationStatus.PENDING
-            user.save()
+            user.is_verified = False
+        
+        user.phone = serializer.validated_data['phone']
+        user.address = serializer.validated_data['address']
+        user.city = serializer.validated_data['city']
+        user.state = serializer.validated_data['state']
+        user.postcode = serializer.validated_data['postcode']
+        user.nid_number = serializer.validated_data['nid_number']
+        user.nid_front = serializer.validated_data['nid_front']
+        user.nid_back = serializer.validated_data['nid_back']
+        user.save()
 
 class UserStatusView(APIView):
     permission_classes = [IsAuthenticated]
@@ -112,7 +105,7 @@ class UserStatusView(APIView):
         return Response({
             'is_verified': request.user.is_verified,
             'role': request.user.role,
-            'verification_status': request.user.verification_status,
+            'verification_status': request.user.verification_status,  
             'profile_picture': request.user.profile_picture.url if request.user.profile_picture else None
         })
 
