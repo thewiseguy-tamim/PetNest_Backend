@@ -98,10 +98,18 @@ class AdminPostSerializer(serializers.ModelSerializer):
 class AdminVerificationRequestSerializer(serializers.ModelSerializer):
     nid_front = serializers.ImageField(use_url=True)
     nid_back = serializers.ImageField(use_url=True)
+    user = serializers.SerializerMethodField()
 
     class Meta:
         model = VerificationRequest
         fields = ['id', 'user', 'nid_number', 'nid_front', 'nid_back', 'phone', 'address', 'city', 'state', 'postcode', 'submitted_at', 'status', 'notes']
+
+    def get_user(self, obj):
+        return {
+            'id': str(obj.user.id),  
+            'username': obj.user.username,
+            'email': obj.user.email,
+        }
 
 class AdminUserApproveSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=['approved', 'rejected', 'pending'])
