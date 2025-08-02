@@ -142,7 +142,7 @@ class PostListCreateView(generics.ListCreateAPIView):
 
 class AdminUserListView(generics.ListAPIView):
     serializer_class = AdminUserSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [AllowAny]
     authentication_classes = [JWTAuthenticationWithJWTScheme]
 
     def get_queryset(self):
