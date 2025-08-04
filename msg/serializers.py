@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from users.models import CustomUser
 from pets.models import Pet
-from msg.models import Message
+from .models import Message
 
 class UserSerializer(serializers.ModelSerializer):
     profile_picture = serializers.ImageField(read_only=True)
@@ -34,7 +34,12 @@ class MessageSerializer(serializers.ModelSerializer):
 
 class ConversationSerializer(serializers.Serializer):
     other_user = UserSerializer()
-    pet = serializers.PrimaryKeyRelatedField(queryset=Pet.objects.all())
-    pet_detail = PetSerializer(source='pet', read_only=True)
-    latest_message = MessageSerializer()
+    pet = serializers.SerializerMethodField()
+    pet_detail = PetSerializer()
+    latest_message = MessageSerializer(allow_null=True)
     unread_count = serializers.IntegerField()
+
+    def get_pet(self, obj):
+        if obj.pet:
+            return {'id': obj.pet.id, 'name': obj.pet.name}
+        return None

@@ -77,10 +77,16 @@ class UserProfileSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
+# In serializers.py
 class AdminUserSerializer(serializers.ModelSerializer):
+    profile_picture = serializers.SerializerMethodField()
+
     class Meta:
         model = CustomUser
-        fields = ['id', 'username', 'email', 'role', 'is_verified', 'verification_status', 'date_joined', 'phone', 'address', 'city', 'state', 'postcode']
+        fields = ['id', 'username', 'email', 'role', 'is_verified', 'verification_status', 'date_joined', 'phone', 'address', 'city', 'state', 'postcode', 'profile_picture']
+
+    def get_profile_picture(self, obj):
+        return obj.profile_picture.url if obj.profile_picture else None
 
 class PostSerializer(serializers.ModelSerializer):
     pet = serializers.PrimaryKeyRelatedField(queryset=Pet.objects.all())
