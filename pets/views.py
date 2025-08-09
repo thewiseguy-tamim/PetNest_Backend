@@ -11,6 +11,7 @@ import logging
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
+from django.shortcuts import redirect  # ADDED
 
 from .models import Pet, PetImage, Payment
 from .serializers import PetSerializer, PaymentSerializer
@@ -44,17 +45,10 @@ class PetCreateView(generics.CreateAPIView):
         # Map frontend key "images" -> serializer field "image" (single file)
         data = request.data.copy()
         try:
-            # If "image" not provided but "images" is, take the first file
             if 'image' not in data:
-                if 'images' in request.FILES:
-                    files = request.FILES.getlist('images')
-                    if files:
-                        data['image'] = files[0]
-                elif 'images' in data and 'images' in request.FILES:
-                    # Fallback if data has key but actual file is in FILES
-                    file_candidate = request.FILES.get('images')
-                    if file_candidate:
-                        data['image'] = file_candidate
+                files = request.FILES.getlist('images')
+                if files:
+                    data['image'] = files[0]
         except Exception as e:
             logger.error(f"Error mapping images -> image: {e}")
 
@@ -63,7 +57,6 @@ class PetCreateView(generics.CreateAPIView):
         validated_data = serializer.validated_data
         is_for_adoption = validated_data.get('is_for_adoption', False)
 
-        # First post is free, otherwise payment required
         with transaction.atomic():
             if user.first_post_free:
                 pet = serializer.save(owner=user)
@@ -81,7 +74,7 @@ class PetCreateView(generics.CreateAPIView):
                 headers = self.get_success_headers(pet_payload)
                 return Response(pet_payload, status=status.HTTP_201_CREATED, headers=headers)
 
-            # Payment needed path
+            # Payment needed
             amount = 5.00 if is_for_adoption else 20.00
             transaction_id = str(uuid.uuid4())
             pet = serializer.save(owner=user)
@@ -149,7 +142,7 @@ class PetListView(generics.ListAPIView):
     serializer_class = PetSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_class = PetFilter
-    permission_classes = [AllowAny]  # Allow any user to create a pet post
+    permission_classes = [AllowAny]
 
 class PetDetailView(generics.RetrieveAPIView):
     queryset = Pet.objects.all()
@@ -199,7 +192,6 @@ class PaymentCallbackView(APIView):
     def post(self, request):
         transaction_id = request.data.get('tran_id')
         status_val = request.data.get('status')
-        val_id = request.data.get('val_id', '')
 
         sslcommerz_settings = {
             'store_id': settings.SSLCOMMERZ_STORE_ID,
@@ -208,56 +200,85 @@ class PaymentCallbackView(APIView):
         }
         sslcommerz = SSLCOMMERZ(sslcommerz_settings)
 
+        # Helper to redirect back to frontend dashboard with a status query
+        frontend_base = settings.FRONTEND_URL.rstrip('/')
+        def redirect_to_dashboard(tag='error'):
+            return redirect(f"{frontend_base}/dashboard/client?payment={tag}")
+
         try:
             verification = sslcommerz.hash_validate(request.data)
             if not verification:
                 logger.warning(f"Invalid payment callback for transaction {transaction_id}")
-                return Response({'detail': 'Invalid payment callback'}, status=400)
+                return redirect_to_dashboard('invalid')
 
-            payment = Payment.objects.get(transaction_id=transaction_id)
-        except Payment.DoesNotExist:
-            logger.error(f"Payment not found for transaction {transaction_id}")
-            return Response({'detail': 'Payment not found'}, status=404)
+            try:
+                payment = Payment.objects.get(transaction_id=transaction_id)
+            except Payment.DoesNotExist:
+                logger.error(f"Payment not found for transaction {transaction_id}")
+                return redirect_to_dashboard('not_found')
+
         except Exception as e:
-            logger.error(f"Error processing payment callback: {str(e)}")
-            return Response({'detail': 'Payment processing failed'}, status=400)
+            logger.error(f"Error processing payment callback (pre-processing): {str(e)}")
+            return redirect_to_dashboard('error')
 
         with transaction.atomic():
-            if status_val == 'VALID':
-                payment.status = Payment.Status.COMPLETED
-                from users.models import Post
-                Post.objects.create(
-                    user=payment.user,
-                    pet=payment.pet,
-                    is_paid=True
-                )
-                # Send email confirmation
-                subject = 'Payment Confirmation - PetNest'
-                html_message = render_to_string('payment_confirmation_email.html', {
-                    'user': payment.user,
-                    'pet': payment.pet,
-                    'transaction_id': payment.transaction_id,
-                    'amount': payment.amount,
-                    'created_at': payment.created_at
-                })
-                plain_message = strip_tags(html_message)
-                try:
-                    send_mail(
-                        subject,
-                        plain_message,
-                        settings.DEFAULT_FROM_EMAIL,
-                        [payment.user.email],
-                        html_message=html_message
+            try:
+                if status_val == 'VALID':
+                    payment.status = Payment.Status.COMPLETED
+                    from users.models import Post
+                    Post.objects.create(
+                        user=payment.user,
+                        pet=payment.pet,
+                        is_paid=True
                     )
-                    logger.info(f"Payment confirmation email sent to {payment.user.email}")
-                except Exception as e:
-                    logger.error(f"Failed to send payment confirmation email: {str(e)}")
-            else:
-                payment.status = Payment.Status.FAILED
-                payment.pet.delete()
-            payment.save()
+                    # Send email confirmation
+                    subject = 'Payment Confirmation - PetNest'
+                    html_message = render_to_string('payment_confirmation_email.html', {
+                        'user': payment.user,
+                        'pet': payment.pet,
+                        'transaction_id': payment.transaction_id,
+                        'amount': payment.amount,
+                        'created_at': payment.created_at
+                    })
+                    plain_message = strip_tags(html_message)
+                    try:
+                        send_mail(
+                            subject,
+                            plain_message,
+                            settings.DEFAULT_FROM_EMAIL,
+                            [payment.user.email],
+                            html_message=html_message
+                        )
+                        logger.info(f"Payment confirmation email sent to {payment.user.email}")
+                    except Exception as e:
+                        logger.error(f"Failed to send payment confirmation email: {str(e)}")
 
-        return Response({'detail': 'Payment processed'}, status=200)
+                    payment.save()
+                    return redirect_to_dashboard('success')
+
+                else:
+                    # Mark payment failed, and soft-disable the pet instead of deleting it
+                    # to preserve payment history (avoid CASCADE deletion)
+                    payment.status = Payment.Status.FAILED
+                    payment.save()
+
+                    try:
+                        pet = payment.pet
+                        pet.availability = False
+                        pet.save()
+                    except Exception as e:
+                        logger.error(f"Failed to mark pet unavailable on failure: {str(e)}")
+
+                    return redirect_to_dashboard('failed')
+
+            except Exception as e:
+                logger.error(f"Error processing payment callback (transaction): {str(e)}")
+                return redirect_to_dashboard('error')
+
+    # Optional: if gateway or user agent hits GET, just redirect to dashboard
+    def get(self, request):
+        frontend_base = settings.FRONTEND_URL.rstrip('/')
+        return redirect(f"{frontend_base}/dashboard/client")
 
 class PaymentHistoryView(generics.ListAPIView):
     serializer_class = PaymentSerializer
