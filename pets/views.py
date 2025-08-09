@@ -1,7 +1,7 @@
 from django.db import transaction
 from rest_framework import generics, permissions, status
 from rest_framework.views import APIView
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.conf import settings
@@ -35,15 +35,35 @@ class IsAdminOrModerator(permissions.BasePermission):
 class PetCreateView(generics.CreateAPIView):
     queryset = Pet.objects.all()
     serializer_class = PetSerializer
+    parser_classes = [MultiPartParser, FormParser]
     # permission_classes = [permissions.IsAuthenticated, IsVerifiedUser]
-    
 
+    def create(self, request, *args, **kwargs):
+        user = request.user
 
-    def perform_create(self, serializer):
-        user = self.request.user
+        # Map frontend key "images" -> serializer field "image" (single file)
+        data = request.data.copy()
+        try:
+            # If "image" not provided but "images" is, take the first file
+            if 'image' not in data:
+                if 'images' in request.FILES:
+                    files = request.FILES.getlist('images')
+                    if files:
+                        data['image'] = files[0]
+                elif 'images' in data and 'images' in request.FILES:
+                    # Fallback if data has key but actual file is in FILES
+                    file_candidate = request.FILES.get('images')
+                    if file_candidate:
+                        data['image'] = file_candidate
+        except Exception as e:
+            logger.error(f"Error mapping images -> image: {e}")
+
+        serializer = self.get_serializer(data=data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
         is_for_adoption = validated_data.get('is_for_adoption', False)
 
+        # First post is free, otherwise payment required
         with transaction.atomic():
             if user.first_post_free:
                 pet = serializer.save(owner=user)
@@ -56,69 +76,73 @@ class PetCreateView(generics.CreateAPIView):
                 )
                 user.first_post_free = False
                 user.save()
-                return Response(PetSerializer(pet).data, status=status.HTTP_201_CREATED)
-            else:
-                amount = 5.00 if is_for_adoption else 20.00
-                transaction_id = str(uuid.uuid4())
-                pet = serializer.save(owner=user)
 
-                sslcommerz_settings = {
-                    'store_id': settings.SSLCOMMERZ_STORE_ID,
-                    'store_pass': settings.SSLCOMMERZ_STORE_PASSWORD,
-                    'issandbox': settings.SSLCOMMERZ_SANDBOX
-                }
-                sslcommerz = SSLCOMMERZ(sslcommerz_settings)
-                
-                post_body = {
-                    'total_amount': amount,
-                    'currency': "USD",
-                    'tran_id': transaction_id,
-                    'success_url': settings.SSLCOMMERZ_SUCCESS_URL,
-                    'fail_url': settings.SSLCOMMERZ_FAIL_URL,
-                    'cancel_url': settings.SSLCOMMERZ_CANCEL_URL,
-                    'emi_option': 0,
-                    'cus_name': user.username,
-                    'cus_email': user.email,
-                    'cus_phone': user.phone or 'N/A',
-                    'cus_add1': user.address or 'N/A',
-                    'cus_add2': user.address or 'N/A',
-                    'cus_city': user.city or 'Dhaka',
-                    'cus_state': user.state or 'Dhaka',
-                    'cus_postcode': user.postcode or '1000',
-                    'cus_country': 'Bangladesh',
-                    'shipping_method': 'NO',
-                    'num_of_item': 1,
-                    'product_name': f"Pet {'Adoption' if is_for_adoption else 'Sale'} Post",
-                    'product_category': 'Pet Listing',
-                    'product_profile': 'general'
-                }
-                
-                try:
-                    response = sslcommerz.createSession(post_body)
-                    if response['status'] == 'SUCCESS':
-                        Payment.objects.create(
-                            user=user,
-                            pet=pet,
-                            transaction_id=transaction_id,
-                            amount=amount
-                        )
-                        return Response({
-                            'payment_url': response['GatewayPageURL'],
-                            'transaction_id': transaction_id,
-                            'pet': PetSerializer(pet).data
-                        }, status=status.HTTP_202_ACCEPTED)
-                    else:
-                        pet.delete()
-                        logger.error(f"Payment initiation failed: {response.get('failedreason', 'Unknown error')}")
-                        return Response({
-                            'detail': f"Payment initiation failed: {response.get('failedreason', 'Unknown error')}"
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                except Exception as e:
-                    pet.delete()
-                    logger.error(f"Payment initiation error: {str(e)}")
+                pet_payload = PetSerializer(pet, context={'request': request}).data
+                headers = self.get_success_headers(pet_payload)
+                return Response(pet_payload, status=status.HTTP_201_CREATED, headers=headers)
+
+            # Payment needed path
+            amount = 5.00 if is_for_adoption else 20.00
+            transaction_id = str(uuid.uuid4())
+            pet = serializer.save(owner=user)
+
+            sslcommerz_settings = {
+                'store_id': settings.SSLCOMMERZ_STORE_ID,
+                'store_pass': settings.SSLCOMMERZ_STORE_PASSWORD,
+                'issandbox': settings.SSLCOMMERZ_SANDBOX
+            }
+            sslcommerz = SSLCOMMERZ(sslcommerz_settings)
+
+            post_body = {
+                'total_amount': amount,
+                'currency': "USD",
+                'tran_id': transaction_id,
+                'success_url': settings.SSLCOMMERZ_SUCCESS_URL,
+                'fail_url': settings.SSLCOMMERZ_FAIL_URL,
+                'cancel_url': settings.SSLCOMMERZ_CANCEL_URL,
+                'emi_option': 0,
+                'cus_name': user.username,
+                'cus_email': user.email,
+                'cus_phone': user.phone or 'N/A',
+                'cus_add1': user.address or 'N/A',
+                'cus_add2': user.address or 'N/A',
+                'cus_city': user.city or 'Dhaka',
+                'cus_state': user.state or 'Dhaka',
+                'cus_postcode': user.postcode or '1000',
+                'cus_country': 'Bangladesh',
+                'shipping_method': 'NO',
+                'num_of_item': 1,
+                'product_name': f"Pet {'Adoption' if is_for_adoption else 'Sale'} Post",
+                'product_category': 'Pet Listing',
+                'product_profile': 'general'
+            }
+
+            try:
+                response = sslcommerz.createSession(post_body)
+                if response.get('status') == 'SUCCESS' and response.get('GatewayPageURL'):
+                    Payment.objects.create(
+                        user=user,
+                        pet=pet,
+                        transaction_id=transaction_id,
+                        amount=amount
+                    )
                     return Response({
-                        'detail': f"Payment initiation failed: {str(e)}"
-                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                        'payment_url': response['GatewayPageURL'],
+                        'transaction_id': transaction_id,
+                        'pet': PetSerializer(pet, context={'request': request}).data
+                    }, status=status.HTTP_202_ACCEPTED)
+                else:
+                    pet.delete()
+                    logger.error(f"Payment initiation failed: {response.get('failedreason', 'Unknown error')}")
+                    return Response({
+                        'detail': f"Payment initiation failed: {response.get('failedreason', 'Unknown error')}"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                pet.delete()
+                logger.error(f"Payment initiation error: {str(e)}")
+                return Response({
+                    'detail': f"Payment initiation failed: {str(e)}"
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class PetListView(generics.ListAPIView):
     queryset = Pet.objects.filter(availability=True)
@@ -174,7 +198,7 @@ class PaymentCallbackView(APIView):
 
     def post(self, request):
         transaction_id = request.data.get('tran_id')
-        status = request.data.get('status')
+        status_val = request.data.get('status')
         val_id = request.data.get('val_id', '')
 
         sslcommerz_settings = {
@@ -183,7 +207,7 @@ class PaymentCallbackView(APIView):
             'issandbox': settings.SSLCOMMERZ_SANDBOX
         }
         sslcommerz = SSLCOMMERZ(sslcommerz_settings)
-        
+
         try:
             verification = sslcommerz.hash_validate(request.data)
             if not verification:
@@ -199,7 +223,7 @@ class PaymentCallbackView(APIView):
             return Response({'detail': 'Payment processing failed'}, status=400)
 
         with transaction.atomic():
-            if status == 'VALID':
+            if status_val == 'VALID':
                 payment.status = Payment.Status.COMPLETED
                 from users.models import Post
                 Post.objects.create(
