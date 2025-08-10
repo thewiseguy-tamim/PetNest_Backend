@@ -189,96 +189,124 @@ class PetImageUploadView(APIView):
 class PaymentCallbackView(APIView):
     permission_classes = [permissions.AllowAny]
 
-    def post(self, request):
-        transaction_id = request.data.get('tran_id')
-        status_val = request.data.get('status')
+    SUCCESS_STATUSES = {'VALID', 'VALIDATED', 'SUCCESS', 'VALIDATION_SUCCESS'}
+    FAIL_STATUSES = {'FAILED', 'CANCELLED', 'CANCEL'}
 
-        sslcommerz_settings = {
-            'store_id': settings.SSLCOMMERZ_STORE_ID,
-            'store_pass': settings.SSLCOMMERZ_STORE_PASSWORD,
-            'issandbox': settings.SSLCOMMERZ_SANDBOX
-        }
-        sslcommerz = SSLCOMMERZ(sslcommerz_settings)
-
-        # Helper to redirect back to frontend dashboard with a status query
+    def _redirect(self, tag='error'):
         frontend_base = settings.FRONTEND_URL.rstrip('/')
-        def redirect_to_dashboard(tag='error'):
-            return redirect(f"{frontend_base}/dashboard/client?payment={tag}")
+        return redirect(f"{frontend_base}/dashboard/client?payment={tag}")
 
+    def _collect_params(self, request):
+        # Merge POST body and GET query so we can handle both redirect styles
+        merged = {}
         try:
-            verification = sslcommerz.hash_validate(request.data)
-            if not verification:
-                logger.warning(f"Invalid payment callback for transaction {transaction_id}")
-                return redirect_to_dashboard('invalid')
+            for k, v in request.data.items():
+                merged[k] = v
+        except Exception:
+            pass
+        try:
+            for k in request.query_params.keys():
+                if k not in merged:
+                    merged[k] = request.query_params.get(k)
+        except Exception:
+            pass
+        return merged
 
-            try:
-                payment = Payment.objects.get(transaction_id=transaction_id)
-            except Payment.DoesNotExist:
-                logger.error(f"Payment not found for transaction {transaction_id}")
-                return redirect_to_dashboard('not_found')
+    def post(self, request):
+        return self._handle(request)
 
+    def get(self, request):
+        # Gateway may hit GET after POST, or only GET on some flows
+        return self._handle(request)
+
+    def _handle(self, request):
+        params = self._collect_params(request)
+        transaction_id = params.get('tran_id')
+        status_val = (params.get('status') or '').upper()
+        val_id = params.get('val_id')
+
+        logger.info(f"[SSLCOMMERZ CALLBACK] method={request.method}, tran_id={transaction_id}, status={status_val}, has_val_id={bool(val_id)}")
+
+        if not transaction_id:
+            logger.error("Callback missing tran_id")
+            return self._redirect('error')
+
+        # Fetch payment
+        try:
+            payment = Payment.objects.get(transaction_id=transaction_id)
+        except Payment.DoesNotExist:
+            logger.error(f"Payment not found for transaction {transaction_id}")
+            return self._redirect('not_found')
+
+        # Attempt hash validation only when signature fields are present (IPN style)
+        try:
+            sslcommerz_settings = {
+                'store_id': settings.SSLCOMMERZ_STORE_ID,
+                'store_pass': settings.SSLCOMMERZ_STORE_PASSWORD,
+                'issandbox': settings.SSLCOMMERZ_SANDBOX
+            }
+            sslcommerz = SSLCOMMERZ(sslcommerz_settings)
+            if 'verify_sign' in params and 'verify_key' in params:
+                is_valid = sslcommerz.hash_validate(params)
+                if not is_valid:
+                    logger.warning(f"hash_validate failed for tran_id={transaction_id}")
+            else:
+                logger.info("No verify_sign present (browser redirect); skipping hash validation.")
         except Exception as e:
-            logger.error(f"Error processing payment callback (pre-processing): {str(e)}")
-            return redirect_to_dashboard('error')
+            logger.error(f"hash_validate exception tran_id={transaction_id}: {e}")
 
+        # Process status
         with transaction.atomic():
             try:
-                if status_val == 'VALID':
+                if status_val in self.SUCCESS_STATUSES:
                     payment.status = Payment.Status.COMPLETED
+                    payment.save()
+
+                    # Create post if not already created
                     from users.models import Post
-                    Post.objects.create(
-                        user=payment.user,
-                        pet=payment.pet,
-                        is_paid=True
-                    )
-                    # Send email confirmation
-                    subject = 'Payment Confirmation - PetNest'
-                    html_message = render_to_string('payment_confirmation_email.html', {
-                        'user': payment.user,
-                        'pet': payment.pet,
-                        'transaction_id': payment.transaction_id,
-                        'amount': payment.amount,
-                        'created_at': payment.created_at
-                    })
-                    plain_message = strip_tags(html_message)
+                    if not Post.objects.filter(user=payment.user, pet=payment.pet).exists():
+                        Post.objects.create(user=payment.user, pet=payment.pet, is_paid=True)
+
+                    # Email confirmation (best-effort)
                     try:
+                        subject = 'Payment Confirmation - PetNest'
+                        html_message = render_to_string('payment_confirmation_email.html', {
+                            'user': payment.user,
+                            'pet': payment.pet,
+                            'transaction_id': payment.transaction_id,
+                            'amount': payment.amount,
+                            'created_at': payment.created_at
+                        })
                         send_mail(
                             subject,
-                            plain_message,
+                            strip_tags(html_message),
                             settings.DEFAULT_FROM_EMAIL,
                             [payment.user.email],
                             html_message=html_message
                         )
-                        logger.info(f"Payment confirmation email sent to {payment.user.email}")
                     except Exception as e:
-                        logger.error(f"Failed to send payment confirmation email: {str(e)}")
+                        logger.error(f"Email send error: {e}")
 
-                    payment.save()
-                    return redirect_to_dashboard('success')
+                    return self._redirect('success')
 
-                else:
-                    # Mark payment failed, and soft-disable the pet instead of deleting it
-                    # to preserve payment history (avoid CASCADE deletion)
+                elif status_val in self.FAIL_STATUSES or not status_val:
                     payment.status = Payment.Status.FAILED
                     payment.save()
-
                     try:
                         pet = payment.pet
                         pet.availability = False
                         pet.save()
                     except Exception as e:
-                        logger.error(f"Failed to mark pet unavailable on failure: {str(e)}")
+                        logger.error(f"Failed to mark pet unavailable on failure: {e}")
+                    return self._redirect('failed')
 
-                    return redirect_to_dashboard('failed')
+                else:
+                    logger.warning(f"Unknown payment status '{status_val}' for tran_id={transaction_id}")
+                    return self._redirect('error')
 
             except Exception as e:
-                logger.error(f"Error processing payment callback (transaction): {str(e)}")
-                return redirect_to_dashboard('error')
-
-    # Optional: if gateway or user agent hits GET, just redirect to dashboard
-    def get(self, request):
-        frontend_base = settings.FRONTEND_URL.rstrip('/')
-        return redirect(f"{frontend_base}/dashboard/client")
+                logger.error(f"Callback processing exception for tran_id={transaction_id}: {e}")
+                return self._redirect('error')
 
 class PaymentHistoryView(generics.ListAPIView):
     serializer_class = PaymentSerializer
