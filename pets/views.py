@@ -11,7 +11,8 @@ import logging
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
-from django.shortcuts import redirect  # ADDED
+from django.shortcuts import redirect  
+from rest_framework.parsers import MultiPartParser, FormParser
 
 from .models import Pet, PetImage, Payment
 from .serializers import PetSerializer, PaymentSerializer
@@ -153,6 +154,31 @@ class PetUpdateView(generics.UpdateAPIView):
     queryset = Pet.objects.all()
     serializer_class = PetSerializer
     permission_classes = [permissions.IsAuthenticated, IsVerifiedUser, IsOwner]
+    parser_classes = [MultiPartParser, FormParser]  # allow file/form data
+
+    def update(self, request, *args, **kwargs):
+        # Force partial update so 'image' is optional
+        partial = True
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+    
+class PetImageDeleteView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, image_id):
+        try:
+            image = PetImage.objects.select_related('pet', 'pet__owner').get(pk=image_id)
+        except PetImage.DoesNotExist:
+            return Response({'detail': 'Image not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if image.pet.owner != request.user:
+            return Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+
+        image.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class PetDeleteView(generics.DestroyAPIView):
     queryset = Pet.objects.all()

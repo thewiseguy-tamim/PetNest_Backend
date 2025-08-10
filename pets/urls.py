@@ -7,7 +7,8 @@ from .views import (
     PetDeleteView,
     PetImageUploadView,
     PaymentCallbackView,
-    PaymentHistoryView
+    PaymentHistoryView,
+    PetImageDeleteView
 )
 
 urlpatterns = [
@@ -19,4 +20,5 @@ urlpatterns = [
     path('<int:pk>/upload-images/', PetImageUploadView.as_view(), name='pet-upload-images'),
     path('payment/callback/', PaymentCallbackView.as_view(), name='payment-callback'),
     path('payment/history/', PaymentHistoryView.as_view(), name='payment-history'),
+     path('images/<int:image_id>/delete/', PetImageDeleteView.as_view(), name='pet-image-delete'),
 ]
