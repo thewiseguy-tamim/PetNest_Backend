@@ -142,19 +142,19 @@ class PostListCreateView(generics.ListCreateAPIView):
 
 class AdminUserListView(generics.ListAPIView):
     serializer_class = AdminUserSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [ModeratorOrAdminPermission]
     authentication_classes = [JWTAuthenticationWithJWTScheme]
 
     def get_queryset(self):
         queryset = CustomUser.objects.all()
-        status = self.request.query_params.get('status')
+        status_param = self.request.query_params.get('status')
         role = self.request.query_params.get('role')
-        if status:
-            if status == 'verified':
+        if status_param:
+            if status_param == 'verified':
                 queryset = queryset.filter(is_verified=True)
-            elif status == 'pending':
+            elif status_param == 'pending':
                 queryset = queryset.filter(is_verified=False, verification_status=CustomUser.VerificationStatus.PENDING)
-            elif status == 'rejected':
+            elif status_param == 'rejected':
                 queryset = queryset.filter(is_verified=False, verification_status=CustomUser.VerificationStatus.REJECTED)
         if role:
             queryset = queryset.filter(role=role)
@@ -162,12 +162,18 @@ class AdminUserListView(generics.ListAPIView):
 
 class AdminUserDetailView(generics.RetrieveDestroyAPIView):
     serializer_class = AdminUserSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [ModeratorOrAdminPermission]  # allow moderators to view
     authentication_classes = [JWTAuthenticationWithJWTScheme]
     queryset = CustomUser.objects.all()
 
+    # restrict destructive action (delete) to admins only
+    def delete(self, request, *args, **kwargs):
+        if request.user.role != CustomUser.Role.ADMIN:
+            return Response({"detail": "Only admins can delete users."}, status=status.HTTP_403_FORBIDDEN)
+        return super().delete(request, *args, **kwargs)
+
 class AdminUserApproveView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [ModeratorOrAdminPermission]  # allow moderators to approve/reject
     authentication_classes = [JWTAuthenticationWithJWTScheme]
     serializer_class = AdminUserApproveSerializer
 
@@ -227,7 +233,7 @@ class AdminUserApproveView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class AdminUserRoleUpdateView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser]  # keep role changes admin-only
     authentication_classes = [JWTAuthenticationWithJWTScheme]
     serializer_class = AdminUserRoleUpdateSerializer
 
@@ -258,9 +264,9 @@ class AdminVerificationRequestListView(generics.ListAPIView):
 
     def get_queryset(self):
         queryset = VerificationRequest.objects.all()
-        status = self.request.query_params.get('status')
-        if status:
-            queryset = queryset.filter(status=status)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            queryset = queryset.filter(status=status_param)
         return queryset
 
 class AdminPostListView(generics.ListAPIView):

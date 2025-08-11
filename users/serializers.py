@@ -112,9 +112,12 @@ class AdminVerificationRequestSerializer(serializers.ModelSerializer):
 
     def get_user(self, obj):
         return {
-            'id': str(obj.user.id),  
+            'id': str(obj.user.id),
             'username': obj.user.username,
             'email': obj.user.email,
+            'profile_picture': obj.user.profile_picture.url if obj.user.profile_picture else None,  # add avatar URL
+            'role': obj.user.role,
+            'is_verified': obj.user.is_verified,
         }
 
 class AdminUserApproveSerializer(serializers.Serializer):
